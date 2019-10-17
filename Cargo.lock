@@ -9,6 +9,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "arrayvec"
 version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -270,12 +275,12 @@ dependencies = [
 name = "currencies"
 version = "0.1.0"
 dependencies = [
+ "anyhow 1.0.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "askama 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "exitfailure 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-preview 0.3.0-alpha.19 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper 0.13.0-alpha.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper-rustls 0.18.0-alpha.1 (git+https://github.com/CryZe/hyper-rustls.git?branch=beta-compatibility)",
@@ -1957,6 +1962,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [metadata]
 "checksum aho-corasick 0.7.6 (registry+https://github.com/rust-lang/crates.io-index)" = "58fb5e95d83b38284460a5fda7d6470aa0b8844d283a0b614b8535e880800d2d"
+"checksum anyhow 1.0.13 (registry+https://github.com/rust-lang/crates.io-index)" = "d924fe380bbe3264e80847258b46d1d558203d8bc9a80dbdc501f3b114181ded"
 "checksum arrayvec 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)" = "b8d73f9beda665eaa98ab9e4f7442bd4e7de6652587de55b2525e52e29c1b0ba"
 "checksum askama 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3dc2a4b6d7f812d2b13d251ae792caecebd635d6401761162d4b71d5ebe1a010"
 "checksum askama_derive 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "23ee2fff0f22ad5d215cace1227cd036c28e81e26206763bb837b6d0e766c87d"

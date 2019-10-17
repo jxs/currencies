@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use exitfailure::ExitDisplay;
-use failure::{format_err, Error};
+use anyhow::{anyhow, Error};
 use warp::Filter;
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<(), ExitDisplay<Error>> {
     let port = env::var("PORT")
         .unwrap_or("3030".to_string())
         .parse()
-        .map_err(|e| format_err!("could not parse port as valid number, {}", e))?;
+        .map_err(|e| anyhow!("could not parse port as valid number, {}", e))?;
 
     let db_location = std::env::var("DB_LOCATION").unwrap_or_else(|_| "db".to_string());
     let db = Db::init(&db_location).await?;

@@ -180,21 +180,13 @@
   <div class="container-fluid">
     <h1>Currency rates <span class="badge badge-secondary">{{ date }}</span></h1>
     <div id="currencies">
-      <div class="row">
-        <div class="col col-currency">
-          <span class="flag EUR"></span> EUR
-        </div>
-        <div class="col">
-          <input type="text" pattern="\d*" class="form-control" value="1" data-currency-value="1">
-        </div>
-      </div>
       {% for currency in currencies %}
       <div class="row">
         <div class="col col-currency">
           <span class="flag {{ currency.name }}"></span> {{ currency.name }}
         </div>
         <div class="col">
-          <input type="text" pattern="\d*" class="form-control" value="{{ currency.rate }}" data-currency-value="{{ currency.rate }}">
+          <input type="text" inputmode="numeric" pattern="[+-]?([0-9]*[\,,.])?[0-9]+" class="form-control" value="{{ currency.rate }}" data-currency-value="{{ currency.rate }}">
         </div>
       </div>
       {% endfor %}
@@ -207,7 +199,6 @@
         let base = Number.parseFloat(e.target.attributes["data-currency-value"].value);
         let euro = (newValue / base);
         Array.from(document.querySelectorAll("#currencies input")).forEach(input => {
-          debugger;
           if (e.target == input) {return;}
           input.value = (input.attributes["data-currency-value"].value * euro).toPrecision(6);
         });

@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use failure::{format_err, Error};
+use anyhow::{anyhow, Error};
 use futures::TryStreamExt;
 use hyper::Client;
 use hyper_rustls::HttpsConnector;
@@ -33,7 +33,7 @@ pub struct Date {
 impl Date {
     pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
         NaiveDate::from_str(&self.value)
-            .map_err(|e| format_err!("could not parse value as date {}", e))
+            .map_err(|e| anyhow!("could not parse value as date {}", e))
     }
 }
 
@@ -56,7 +56,7 @@ pub async fn fetch_daily() -> Result<Date, Error> {
     let mut dates = fetch(ECB_DAILY).await?;
     let dates = dates
         .pop()
-        .ok_or_else(|| format_err!("Daily rates fetched from ECB are empty"))?;
+        .ok_or_else(|| anyhow!("Daily rates fetched from ECB are empty"))?;
     Ok(dates)
 }
 
@@ -66,7 +66,7 @@ pub async fn fetch(url: &str) -> Result<Vec<Date>, Error> {
     let res = client.get(url.parse::<hyper::Uri>()?).await?;
     let body = res.into_body().try_concat().await?;
     let envelope: Envelope = serde_xml_rs::from_reader(body.as_ref())
-        .map_err(|err| format_err!("error parsing curencies from ECB {}", err))?;
+        .map_err(|err| anyhow!("error parsing curencies from ECB {}", err))?;
     Ok(envelope.cube.dates)
 }
 

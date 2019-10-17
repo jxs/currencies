@@ -7,7 +7,7 @@ use std::str::FromStr;
 
 use crate::errors::Reject;
 use chrono::NaiveDate;
-use failure::format_err;
+use anyhow::anyhow;
 use serde::Deserialize;
 use serde_json::json;
 use warp::{Filter, Rejection, Reply};
@@ -122,7 +122,7 @@ async fn history_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Reje
 fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> {
     let first = dates.get(0).ok_or_else(|| {
         warp::reject::custom(Reject::Unhandled(
-            format_err!("empty currency dataset, should have at least 1 element").into(),
+            anyhow!("empty currency dataset, should have at least 1 element").into(),
         ))
     })?;
 

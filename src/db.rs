@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use chrono::naive::NaiveDate;
 use chrono::Duration;
-use failure::{format_err, Error, ResultExt};
+use anyhow::{anyhow, Error, Context};
 use serde::{de::DeserializeOwned, Serialize};
 use sled::IVec;
 use tokio_executor::blocking;
@@ -39,14 +39,14 @@ impl Db {
     pub async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         log::info!("no database found, going to bootstrap a new one");
         log::info!("dowloading ECB's currency values since 99");
-        let dates = crate::currencies::fetch_hist().await.with_context(|e| {
-            format!("could not fetch Historical reference rates from ECB {}", e)
+        let dates = crate::currencies::fetch_hist().await.with_context(|| {
+            format!("could not fetch Historical reference rates from ECB")
         })?;
 
         log::info!("populating new db with currency values");
         let current_date = dates
             .first()
-            .ok_or_else(|| format_err!("fetched Historical reference rates from ECB are empy"))?;
+            .ok_or_else(|| anyhow!("fetched Historical reference rates from ECB are empy"))?;
 
         let db = Db::open(path)?;
 
@@ -77,10 +77,10 @@ impl Db {
         let current = self
             .get::<Vec<u8>>(b"current")
             .await?
-            .ok_or_else(|| format_err!("could not find `current` key on the database"))?;
+            .ok_or_else(|| anyhow!("could not find `current` key on the database"))?;
 
         let date = self.get::<Date>(&current).await?.ok_or_else(|| {
-            format_err!("could not find `current` reference rates on the database")
+            anyhow!("could not find `current` reference rates on the database")
         })?;
 
         Ok(date)
@@ -109,7 +109,7 @@ impl Db {
                         bincode::deserialize::<Date>(&value)
                     })
                     .collect::<Result<Vec<Date>, _>>()
-                    .with_context(|err| format!("could not get range from db {}", err))
+                    .with_context(|| format!("could not get range from db"))
             })
             .await?;
         Ok(dates)
@@ -173,12 +173,12 @@ impl Db {
                         });
                         self.put(&day, &date).await?;
                         self.put(b"current", &date_as_key(&date.value)?).await?;
-                        log::debug!("inserted rates for {}", date.value.to_string());
+                        log::info!("inserted rates for {}", date.value.to_string());
                     }
                 }
             }
             Ordering::Less => {
-                return Err(format_err!(
+                return Err(anyhow!(
                     "error, current database rates are younger than fetched from ECB"
                 ))
             }
