@@ -1,11 +1,14 @@
+use chrono::NaiveDate;
 use failure::{format_err, Error};
 use futures::TryStreamExt;
 use hyper::Client;
 use hyper_rustls::HttpsConnector;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 const ECB_DAILY: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 const ECB_HIST: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.xml";
+const ECB_HIST_LAST_90: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml";
 
 #[derive(Debug, Deserialize)]
 pub struct Envelope {
@@ -19,7 +22,7 @@ pub struct Cube {
     dates: Vec<Date>,
 }
 
-#[derive(Debug, Deserialize, Default, Serialize)]
+#[derive(Debug, Deserialize, Default, PartialEq, Serialize)]
 pub struct Date {
     #[serde(rename = "time", default)]
     pub value: String,
@@ -27,10 +30,22 @@ pub struct Date {
     pub currencies: Vec<Currency>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+impl Date {
+    pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
+        NaiveDate::from_str(&self.value)
+            .map_err(|e| format_err!("could not parse value as date {}", e))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Currency {
-    pub currency: String,
+    #[serde(rename = "currency", default)]
+    pub name: String,
     pub rate: f64,
+}
+
+pub async fn fetch_last90() -> Result<Vec<Date>, Error> {
+    fetch(ECB_HIST_LAST_90).await
 }
 
 pub async fn fetch_hist() -> Result<Vec<Date>, Error> {
@@ -53,4 +68,25 @@ pub async fn fetch(url: &str) -> Result<Vec<Date>, Error> {
     let envelope: Envelope = serde_xml_rs::from_reader(body.as_ref())
         .map_err(|err| format_err!("error parsing curencies from ECB {}", err))?;
     Ok(envelope.cube.dates)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_fetch() {
+        let current = fetch_daily().await.unwrap();
+        current.value_as_date().unwrap();
+    }
+
+    #[test]
+    fn test_value_as_date() {
+        let date = Date {
+            value: "1999-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let ddate = date.value_as_date().unwrap();
+        assert_eq!("1999-01-04", &ddate.to_string());
+    }
 }

@@ -1,58 +1,47 @@
 mod api;
 mod currencies;
 mod db;
+mod errors;
 mod handlers;
 
-use exitfailure::ExitDisplay;
-use failure::Error;
-use serde::Serialize;
+use db::Db;
+use std::env;
 use std::sync::Arc;
-use warp::http::StatusCode;
-use warp::{Filter, Rejection, Reply};
+use std::time::{Duration, Instant};
+
+use exitfailure::ExitDisplay;
+use failure::{format_err, Error};
+use warp::Filter;
 
 #[tokio::main]
 async fn main() -> Result<(), ExitDisplay<Error>> {
     env_logger::init();
-    let db = Arc::new(db::init().await?);
+    let port = env::var("PORT")
+        .unwrap_or("3030".to_string())
+        .parse()
+        .map_err(|e| format_err!("could not parse port as valid number, {}", e))?;
 
-    let api = api::routes(db.clone());
+    let db_location = std::env::var("DB_LOCATION").unwrap_or_else(|_| "db".to_string());
+    let db = Db::init(&db_location).await?;
+    let db_filter = Arc::new(db.clone());
+
+    // launch updater daemon
+    tokio::spawn(async move {
+        let mut interval = tokio::timer::Interval::new(Instant::now(), Duration::from_secs(360));
+        while let Some(_) = interval.next().await {
+            db.update().await.expect("error updating database!");
+        }
+    });
+
+    let api = api::routes(db_filter.clone());
 
     let ui = warp::path::end()
         .and(warp::get2())
-        .map(move || db.clone())
+        .map(move || db_filter.clone())
         .and_then(handlers::index);
 
-    let routes = api.or(ui).recover(recover);
+    let routes = api.or(ui).recover(errors::recover);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
     Ok(())
-}
-
-#[derive(Serialize)]
-struct ErrorMessage {
-    code: u16,
-    msg: String,
-}
-
-async fn recover(err: Rejection) -> Result<impl Reply, Rejection> {
-    if let Some(ref err) = err.find_cause::<crate::api::Reject>() {
-        let code = match err {
-            api::Reject::MethodNotAllowed => StatusCode::METHOD_NOT_ALLOWED,
-            api::Reject::InvalidDateFormat(_, _)
-            | api::Reject::PastDate(_)
-            | api::Reject::InvalidSymbol
-            | api::Reject::MissingDateBoundaries
-            | api::Reject::InvalidDateRange
-            | api::Reject::InvalidBase(_) => StatusCode::BAD_REQUEST,
-            api::Reject::DateNotFound(_) => StatusCode::NOT_FOUND,
-        };
-        let msg = err.to_string();
-        let json = warp::reply::json(&ErrorMessage {
-            code: code.as_u16(),
-            msg,
-        });
-        return Ok(warp::reply::with_status(json, code));
-    }
-
-    Err(err)
 }

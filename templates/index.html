@@ -185,16 +185,16 @@
           <span class="flag EUR"></span> EUR
         </div>
         <div class="col">
-          <input type="text" class="form-control" value="1" data-currency-value="1">
+          <input type="text" pattern="\d*" class="form-control" value="1" data-currency-value="1">
         </div>
       </div>
       {% for currency in currencies %}
       <div class="row">
         <div class="col col-currency">
-          <span class="flag {{ currency.currency }}"></span> {{ currency.currency }}
+          <span class="flag {{ currency.name }}"></span> {{ currency.name }}
         </div>
         <div class="col">
-          <input type="text" class="form-control" value="{{ currency.rate }}" data-currency-value="{{ currency.rate }}">
+          <input type="text" pattern="\d*" class="form-control" value="{{ currency.rate }}" data-currency-value="{{ currency.rate }}">
         </div>
       </div>
       {% endfor %}

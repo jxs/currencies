@@ -4,28 +4,38 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::naive::NaiveDate;
+use chrono::Duration;
 use failure::{format_err, Error, ResultExt};
-use rocksdb::{Direction, IteratorMode, Options, DB};
 use serde::{de::DeserializeOwned, Serialize};
+use sled::IVec;
 use tokio_executor::blocking;
 
-use crate::currencies::{Currency, Date};
+use crate::currencies::{self, Currency, Date};
 
-pub async fn init() -> Result<Db, Error> {
-    let path = Path::new("db");
-    if path.exists() {
-        log::info!("previous db file found, going to open it");
-        Db::open(path)
-    } else {
-        Db::bootstrap_new(path).await
-    }
+pub fn date_as_key(date: &str) -> Result<Vec<u8>, Error> {
+    let date = NaiveDate::from_str(date)?
+        .and_hms(0, 0, 0)
+        .timestamp()
+        .to_be_bytes()
+        .to_vec();
+    Ok(date)
 }
 
+#[derive(Clone)]
 pub struct Db {
-    inner: Arc<rocksdb::DB>,
+    inner: Arc<sled::Db>,
 }
 
 impl Db {
+    pub async fn init<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
+        if path.as_ref().exists() {
+            log::info!("previous db file found, going to open it");
+            Db::open(path)
+        } else {
+            Db::bootstrap_new(path).await
+        }
+    }
+
     pub async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         log::info!("no database found, going to bootstrap a new one");
         log::info!("dowloading ECB's currency values since 99");
@@ -40,67 +50,45 @@ impl Db {
 
         let db = Db::open(path)?;
 
-        db.put("current", &current_date.value).await?;
+        db.put(b"current", &date_as_key(&current_date.value)?)
+            .await?;
         for mut date in dates {
-            let day = date.value;
+            let day = &date_as_key(&date.value)?;
             //insert EUR base
             date.currencies.push(Currency {
-                currency: "EUR".to_string(),
+                name: "EUR".to_string(),
                 rate: 1.0,
             });
-            db.put(&day, &date.currencies).await?;
+            db.put(&day, &date).await?;
         }
-        db.run(|db| db.flush()).await?;
+        db.inner.flush_async().await?;
 
         Ok(db)
     }
 
     fn open<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
-        let mut options = Options::default();
-        options.create_if_missing(true);
-        options.set_comparator("dates", |first, second| {
-            let first =
-                std::str::from_utf8(first).expect("could not parse first db key in comparator");
-            let second =
-                std::str::from_utf8(second).expect("could not parse second db key in comparator");
-
-            // we only want to sort date types, but they all should be followed
-            match (NaiveDate::from_str(first), NaiveDate::from_str(second)) {
-                (Ok(first), Ok(second)) => first.cmp(&second),
-                (Err(_), Ok(_)) => Ordering::Greater,
-                (Ok(_), Err(_)) => Ordering::Less,
-                (Err(_), Err(_)) => Ordering::Equal,
-            }
-        });
-
         let db = Db {
-            inner: Arc::new(rocksdb::DB::open(&options, path)?),
+            inner: Arc::new(sled::Db::open(&path)?),
         };
         Ok(db)
     }
 
     pub async fn get_current_rates(&self) -> Result<Date, Error> {
         let current = self
-            .get::<String>("current")
+            .get::<Vec<u8>>(b"current")
             .await?
             .ok_or_else(|| format_err!("could not find `current` key on the database"))?;
 
-        let result = self.get::<Vec<Currency>>(&current).await?.ok_or_else(|| {
+        let date = self.get::<Date>(&current).await?.ok_or_else(|| {
             format_err!("could not find `current` reference rates on the database")
         })?;
 
-        Ok(Date {
-            value: current,
-            currencies: result,
-        })
+        Ok(date)
     }
 
-    pub async fn get_day_rate(&self, day: &str) -> Result<Option<Date>, Error> {
-        match self.get::<Vec<Currency>>(day).await? {
-            Some(currencies) => Ok(Some(Date {
-                value: day.to_string(),
-                currencies: currencies,
-            })),
+    pub async fn get_day_rates(&self, day: &str) -> Result<Option<Date>, Error> {
+        match self.get::<Date>(&date_as_key(day)?).await? {
+            Some(date) => Ok(Some(date)),
             None => Ok(None),
         }
     }
@@ -110,67 +98,195 @@ impl Db {
         start_at: NaiveDate,
         end_at: NaiveDate,
     ) -> Result<Vec<Date>, Error> {
-        self.run(move |db| {
-            let mut results = Vec::new();
-            let iter = db.iterator(IteratorMode::From(
-                end_at.to_string().as_bytes(),
-                Direction::Reverse,
-            ));
-            for (key, value) in iter {
-                let date =
-                    std::str::from_utf8(&key).context("could not parse database  key as string")?;
-                let date = NaiveDate::from_str(date)
-                    .context("could not parse database key as NaiveDate")?;
-                if date >= start_at {
-                    let currencies = bincode::deserialize::<Vec<Currency>>(&value[..])
-                        .with_context(|e| format!("could Deserialize database value"))?;
-                    results.push(Date {
-                        value: date.to_string(),
-                        currencies: currencies,
-                    });
-                } else {
-                    break;
-                }
-            }
-            Ok(results)
-        })
-        .await
+        let range_start = date_as_key(&start_at.to_string())?;
+        let range_end = date_as_key(&end_at.to_string())?;
+
+        let dates = self
+            .execute(move |db| {
+                db.range(range_start..=range_end)
+                    .map(|result| {
+                        let (_key, value) = result.unwrap();
+                        bincode::deserialize::<Date>(&value)
+                    })
+                    .collect::<Result<Vec<Date>, _>>()
+                    .with_context(|err| format!("could not get range from db {}", err))
+            })
+            .await?;
+        Ok(dates)
     }
 
-    async fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<(), Error> {
+    async fn put<T>(&self, key: &[u8], value: &T) -> Result<Option<IVec>, Error>
+    where
+        T: Serialize,
+    {
+        let key = key.to_vec();
         let encoded: Vec<u8> = bincode::serialize(value)?;
-        let key = key.to_string();
         let db = self.inner.clone();
 
-        blocking::run(move || db.put(&key, encoded))
+        blocking::run(move || db.insert(&key, encoded))
             .await
             .map_err(|e| e.into())
     }
 
-    async fn get<T>(&self, key: &str) -> Result<Option<T>, Error>
+    async fn get<T>(&self, key: &[u8]) -> Result<Option<T>, Error>
     where
         T: DeserializeOwned + Send + 'static,
     {
-        let key = key.to_string();
+        let key = key.to_vec();
+        let opt = self.execute(move |db| db.get(&key)).await?;
+        let blob = match opt {
+            Some(blob) => blob,
+            None => return Ok(None),
+        };
 
-        self.run(move |db| {
-            let blob = match db.get(&key)? {
-                Some(blob) => blob,
-                None => return Ok(None),
-            };
-
-            let t = bincode::deserialize::<T>(&blob[..])?;
-            Ok(Some(t))
-        })
-        .await
+        let t = bincode::deserialize::<T>(&blob)?;
+        Ok(Some(t))
     }
 
-    pub async fn run<F, T>(&self, f: F) -> T
+    pub async fn update(&self) -> Result<(), Error> {
+        let current = currencies::fetch_daily().await?.value_as_date()?;
+        let db_current = self.get_current_rates().await?.value_as_date()?;
+
+        match current.cmp(&db_current) {
+            Ordering::Equal => {
+                log::debug!("database currencies up to date");
+                return Ok(());
+            }
+
+            Ordering::Greater => {
+                log::debug!("going to update database with new currencies");
+                let mut dates = match current - db_current {
+                    d if d > Duration::days(90) => currencies::fetch_hist().await?,
+                    d if d < Duration::days(90) && d > Duration::days(1) => {
+                        currencies::fetch_last90().await?
+                    }
+                    _ => vec![currencies::fetch_daily().await?],
+                };
+
+                for date in dates.iter_mut().rev() {
+                    if date.value_as_date()? > db_current {
+                        let day = &date_as_key(&date.value)?;
+                        //insert EUR base
+                        date.currencies.push(Currency {
+                            name: "EUR".to_string(),
+                            rate: 1.0,
+                        });
+                        self.put(&day, &date).await?;
+                        self.put(b"current", &date_as_key(&date.value)?).await?;
+                        log::debug!("inserted rates for {}", date.value.to_string());
+                    }
+                }
+            }
+            Ordering::Less => {
+                return Err(format_err!(
+                    "error, current database rates are younger than fetched from ECB"
+                ))
+            }
+        }
+        Ok(())
+    }
+
+    async fn execute<F, T>(&self, f: F) -> T
     where
-        F: FnOnce(Arc<rocksdb::DB>) -> T + Send + 'static,
+        F: FnOnce(Arc<sled::Db>) -> T + Send + 'static,
         T: Send + 'static,
     {
         let db = self.inner.clone();
-        blocking::run(|| f(db)).await
+        tokio_executor::blocking::run(|| f(db)).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_date_as_key() {
+        let key = date_as_key("1999-01-04").unwrap();
+        assert_eq!(key, vec![0, 0, 0, 0, 54, 144, 4, 128]);
+    }
+
+    #[tokio::test]
+    async fn test_put_get() {
+        let dir = tempdir().unwrap();
+        let path = dir.into_path();
+        let db = Db::open(path.join("db")).unwrap();
+        let date = Date {
+            value: "1999-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key = date_as_key(&date.value).unwrap();
+        db.put(&key, &date).await.unwrap();
+        db.inner.flush_async().await.unwrap();
+        let date2 = db.get(&key).await.unwrap().unwrap();
+        assert_eq!(date, date2);
+    }
+
+    #[tokio::test]
+    async fn test_get_current_rates() {
+        let dir = tempdir().unwrap();
+        let path = dir.into_path();
+        let db = Db::open(path.join("db")).unwrap();
+        let date = Date {
+            value: "1999-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key = date_as_key(&date.value).unwrap();
+        db.put(b"current", &key).await.unwrap();
+        db.put(&key, &date).await.unwrap();
+        db.inner.flush_async().await.unwrap();
+        let current = db.get_current_rates().await.unwrap();
+        assert_eq!(date, current);
+    }
+
+    #[tokio::test]
+    async fn test_get_day_rates() {
+        let dir = tempdir().unwrap();
+        let path = dir.into_path();
+        let db = Db::open(path.join("db")).unwrap();
+        let date = Date {
+            value: "1999-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key = date_as_key(&date.value).unwrap();
+        db.put(&key, &date).await.unwrap();
+        db.inner.flush_async().await.unwrap();
+        let current = db.get_day_rates("1999-01-04").await.unwrap().unwrap();
+        assert_eq!(date, current);
+    }
+
+    #[tokio::test]
+    async fn test_get_range_rates() {
+        let dir = tempdir().unwrap();
+        let path = dir.into_path();
+        let db = Db::open(path.join("db")).unwrap();
+
+        let date = Date {
+            value: "1999-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key = date_as_key(&date.value).unwrap();
+        db.put(&key, &date).await.unwrap();
+
+        let date2 = Date {
+            value: "2003-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key2 = date_as_key(&date2.value).unwrap();
+        db.put(&key2, &date2).await.unwrap();
+
+        let date3 = Date {
+            value: "2012-01-04".to_string(),
+            currencies: Vec::new(),
+        };
+        let key3 = date_as_key(&date3.value).unwrap();
+        db.put(&key3, &date3).await.unwrap();
+        db.inner.flush_async().await.unwrap();
+
+        let begining = NaiveDate::from_str("1999-01-04").unwrap();
+        let end = NaiveDate::from_str("2012-01-04").unwrap();
+        let dates = db.get_range_rates(begining, end).await.unwrap();
+        assert_eq!(dates.len(), 3);
     }
 }

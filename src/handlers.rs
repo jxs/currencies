@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use askama::Template;
 
-use crate::currencies::{fetch_daily, Currency, Date};
+use crate::currencies::Currency;
 use crate::db::Db;
 
 #[derive(Template)]
@@ -12,7 +12,12 @@ struct CurrenciesTemplate<'a> {
     currencies: &'a [Currency],
 }
 
-fn render(date: Date) -> Result<impl warp::Reply, warp::Rejection> {
+pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
+    let date = db
+        .get_current_rates()
+        .await
+        .map_err(|e| warp::reject::custom(e))?;
+
     let rendered = CurrenciesTemplate {
         date: &date.value,
         currencies: date.currencies.as_slice(),
@@ -21,13 +26,4 @@ fn render(date: Date) -> Result<impl warp::Reply, warp::Rejection> {
     .map_err(|e| warp::reject::custom(e))?;
 
     Ok(warp::reply::html(rendered))
-}
-
-pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
-    let currencies = db
-        .get_current_rates()
-        .await
-        .map_err(|e| warp::reject::custom(e))?;
-
-    render(currencies)
 }
