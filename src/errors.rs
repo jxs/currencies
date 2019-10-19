@@ -42,7 +42,7 @@ pub async fn recover(err: Rejection) -> Result<RecoverReply<impl Reply, impl Rep
                 log::trace!("api reject, {}", err);
                 ErrorMessage {
                     code: StatusCode::BAD_REQUEST.as_u16(),
-                    msg: err.to_string()
+                    msg: err.to_string(),
                 }
             }
             Reject::DateNotFound(_) => {
@@ -62,14 +62,14 @@ pub async fn recover(err: Rejection) -> Result<RecoverReply<impl Reply, impl Rep
                     msg: StatusCode::INTERNAL_SERVER_ERROR
                         .canonical_reason()
                         .unwrap()
-                        .to_string()
+                        .to_string(),
                 }
             }
         };
 
         return Ok(RecoverReply::Json(warp::reply::with_status(
             warp::reply::json(&error),
-            StatusCode::from_u16(error.code).unwrap()
+            StatusCode::from_u16(error.code).unwrap(),
         )));
     }
 

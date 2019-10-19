@@ -9,8 +9,8 @@ use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use exitfailure::ExitDisplay;
 use anyhow::{anyhow, Error};
+use exitfailure::ExitDisplay;
 use warp::Filter;
 
 #[tokio::main]

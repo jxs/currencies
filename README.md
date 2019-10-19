@@ -1,4 +1,5 @@
 # Currencies API
+[![Build Status](https://github.com/jxs/currencies/workflows/Rust/badge.svg)](https://github.com/jxs/currencies/actions)
 
 Currency rates API, greatly inspired by [exchangeratesapi](https://github.com/exchangeratesapi/exchangeratesapi), is a free service for current and historical foreign exchange rates [published by the European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html).
 

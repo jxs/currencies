@@ -1,5 +1,5 @@
-use chrono::NaiveDate;
 use anyhow::{anyhow, Error};
+use chrono::NaiveDate;
 use futures::TryStreamExt;
 use hyper::Client;
 use hyper_rustls::HttpsConnector;
@@ -13,16 +13,16 @@ const ECB_HIST_LAST_90: &str = "https://www.ecb.europa.eu/stats/eurofxref/eurofx
 #[derive(Debug, Deserialize)]
 pub struct Envelope {
     #[serde(rename = "Cube", default)]
-    cube: Cube,
+    pub cube: Cube,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Cube {
     #[serde(rename = "Cube", default)]
-    dates: Vec<Date>,
+    pub dates: Vec<Date>,
 }
 
-#[derive(Debug, Deserialize, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Default, PartialEq, Serialize)]
 pub struct Date {
     #[serde(rename = "time", default)]
     pub value: String,
@@ -32,8 +32,7 @@ pub struct Date {
 
 impl Date {
     pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
-        NaiveDate::from_str(&self.value)
-            .map_err(|e| anyhow!("could not parse value as date {}", e))
+        NaiveDate::from_str(&self.value).map_err(|e| anyhow!("could not parse value as date {}", e))
     }
 }
 

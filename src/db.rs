@@ -3,9 +3,9 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use anyhow::{anyhow, Context, Error};
 use chrono::naive::NaiveDate;
 use chrono::Duration;
-use anyhow::{anyhow, Error, Context};
 use serde::{de::DeserializeOwned, Serialize};
 use sled::IVec;
 use tokio_executor::blocking;
@@ -39,9 +39,9 @@ impl Db {
     pub async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         log::info!("no database found, going to bootstrap a new one");
         log::info!("dowloading ECB's currency values since 99");
-        let dates = crate::currencies::fetch_hist().await.with_context(|| {
-            format!("could not fetch Historical reference rates from ECB")
-        })?;
+        let dates = crate::currencies::fetch_hist()
+            .await
+            .with_context(|| format!("could not fetch Historical reference rates from ECB"))?;
 
         log::info!("populating new db with currency values");
         let current_date = dates
@@ -79,9 +79,10 @@ impl Db {
             .await?
             .ok_or_else(|| anyhow!("could not find `current` key on the database"))?;
 
-        let date = self.get::<Date>(&current).await?.ok_or_else(|| {
-            anyhow!("could not find `current` reference rates on the database")
-        })?;
+        let date = self
+            .get::<Date>(&current)
+            .await?
+            .ok_or_else(|| anyhow!("could not find `current` reference rates on the database"))?;
 
         Ok(date)
     }
