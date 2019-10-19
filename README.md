@@ -84,9 +84,9 @@ On initialization it will check the database. If it's empty all the historic rat
 ## Contributing
 Thanks for your interest in the project! All pull requests are welcome from developers of all skill levels. To get started, simply fork the master branch on GitHub to your personal account and then clone the fork into your development environment.
 
-João Oliveira
-
 ## Credits
+João Oliveira (creator)
+
 Madis Väin (madisvain on Github, Twitter), the original creator of the [Exchange Rates API framework](https://github.com/exchangeratesapi/exchangeratesapi).
 
 ## License
