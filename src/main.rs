@@ -17,7 +17,7 @@ use warp::Filter;
 async fn main() -> Result<(), ExitDisplay<Error>> {
     env_logger::init();
     let port = env::var("PORT")
-        .unwrap_or("3030".to_string())
+        .unwrap_or_else(|_| "3030".to_string())
         .parse()
         .map_err(|e| anyhow!("could not parse port as valid number, {}", e))?;
 

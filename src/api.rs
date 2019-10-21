@@ -44,7 +44,7 @@ pub fn routes(db: Arc<Db>) -> impl Filter<Extract = (impl Reply,), Error = Rejec
         .and(warp::path::end())
         .and(warp::get2())
         .and(warp::query::<Params>())
-        .and(db.clone())
+        .and(db)
         .and_then(day_handler);
 
     latest_head.or(history_get).or(latest_get).or(day_get)
@@ -129,7 +129,7 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
     let symbols = match params.symbols {
         Some(symbols_params) => {
             let symbols = symbols_params
-                .split(",")
+                .split(',')
                 .map(String::from)
                 .collect::<Vec<String>>();
             if !symbols
@@ -167,7 +167,7 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
         rates.insert(date.value, currencies);
     }
 
-    let base = params.base.unwrap_or("EUR".to_string());
+    let base = params.base.unwrap_or_else(|| "EUR".to_string());
     let response = if rates.len() < 2 {
         let (date, rates) = rates.into_iter().next().unwrap();
         json! ({

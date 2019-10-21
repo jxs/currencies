@@ -73,7 +73,7 @@ pub async fn recover(err: Rejection) -> Result<RecoverReply<impl Reply, impl Rep
         )));
     }
 
-    return Ok(RecoverReply::Html(StatusCode::INTERNAL_SERVER_ERROR));
+    Ok(RecoverReply::Html(StatusCode::INTERNAL_SERVER_ERROR))
 }
 
 #[derive(Debug)]

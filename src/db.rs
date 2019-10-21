@@ -41,7 +41,7 @@ impl Db {
         log::info!("dowloading ECB's currency values since 99");
         let dates = crate::currencies::fetch_hist()
             .await
-            .with_context(|| format!("could not fetch Historical reference rates from ECB"))?;
+            .with_context(|| "could not fetch Historical reference rates from ECB".to_string())?;
 
         log::info!("populating new db with currency values");
         let current_date = dates
@@ -110,7 +110,7 @@ impl Db {
                         bincode::deserialize::<Date>(&value)
                     })
                     .collect::<Result<Vec<Date>, _>>()
-                    .with_context(|| format!("could not get range from db"))
+                    .with_context(|| "could not get range from db".to_string())
             })
             .await?;
         Ok(dates)

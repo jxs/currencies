@@ -33,7 +33,7 @@ pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
     let mut date = db
         .get_current_rates()
         .await
-        .map_err(|e| warp::reject::custom(e))?;
+        .map_err(warp::reject::custom)?;
 
     sort_currencies(&mut date.currencies);
     let rendered = CurrenciesTemplate {
@@ -41,7 +41,7 @@ pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
         currencies: date.currencies.as_slice(),
     }
     .render()
-    .map_err(|e| warp::reject::custom(e))?;
+    .map_err(warp::reject::custom)?;
 
     Ok(warp::reply::html(rendered))
 }
