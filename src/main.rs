@@ -4,7 +4,6 @@ mod db;
 mod errors;
 mod handlers;
 
-use db::Db;
 use std::env;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,14 +21,14 @@ async fn main() -> Result<(), ExitDisplay<Error>> {
         .map_err(|e| anyhow!("could not parse port as valid number, {}", e))?;
 
     let db_location = std::env::var("DB_LOCATION").unwrap_or_else(|_| "db".to_string());
-    let db = Db::init(&db_location).await?;
+    let db = db::init(&db_location).await?;
     let db_filter = Arc::new(db.clone());
 
     // launch updater daemon
     tokio::spawn(async move {
         let mut interval = tokio::timer::Interval::new(Instant::now(), Duration::from_secs(360));
         while let Some(_) = interval.next().await {
-            db.update().await.expect("error updating database!");
+            db::update(&db).await.expect("error updating database!");
         }
     });
 

@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 askama = "0.8.0"
 hyper = "0.13.0-alpha.2"
-warp =  { git = "https://github.com/jxs/warp.git" }
+warp =  { git = "https://github.com/seanmonstar/warp.git" }
 hyper-rustls = { git = "https://github.com/CryZe/hyper-rustls.git", branch = "beta-compatibility" }
 serde-xml-rs = "0.3.1"
 tokio = "0.2.0-alpha.6"

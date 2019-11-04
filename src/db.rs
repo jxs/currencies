@@ -21,22 +21,19 @@ pub fn date_as_key(date: &str) -> Result<Vec<u8>, Error> {
     Ok(date)
 }
 
-#[derive(Clone)]
-pub struct Db {
-    inner: Arc<sled::Db>,
-}
 
-impl Db {
-    pub async fn init<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
+pub async fn init<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         if path.as_ref().exists() {
             log::info!("previous db file found, going to open it");
             Db::open(path)
         } else {
-            Db::bootstrap_new(path).await
+            bootstrap_new(path).await
         }
-    }
+}
 
-    pub async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
+// bootstrap a new database by fetching all histrical reference rates from ECB
+async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
+
         log::info!("no database found, going to bootstrap a new one");
         log::info!("dowloading ECB's currency values since 99");
         let dates = crate::currencies::fetch_hist()
@@ -64,7 +61,58 @@ impl Db {
         db.inner.flush_async().await?;
 
         Ok(db)
+}
+
+// check if there are any missing currencies days and if so fetch and add them to the database
+pub async fn update(db: &Db) -> Result<(), Error> {
+    let current = currencies::fetch_daily().await?.value_as_date()?;
+    let db_current = db.get_current_rates().await?.value_as_date()?;
+
+    match current.cmp(&db_current) {
+        Ordering::Equal => {
+            log::debug!("database currencies up to date");
+            return Ok(());
+        }
+
+        Ordering::Greater => {
+            log::debug!("going to update database with new currencies");
+            let mut dates = match current - db_current {
+                d if d > Duration::days(90) => currencies::fetch_hist().await?,
+                d if d < Duration::days(90) && d > Duration::days(1) => {
+                    currencies::fetch_last90().await?
+                }
+                _ => vec![currencies::fetch_daily().await?],
+            };
+
+            for date in dates.iter_mut().rev() {
+                if date.value_as_date()? > db_current {
+                    let day = &date_as_key(&date.value)?;
+                    //insert EUR base
+                    date.currencies.push(Currency {
+                        name: "EUR".to_string(),
+                        rate: 1.0,
+                    });
+                    db.put(&day, &date).await?;
+                    db.put(b"current", &date_as_key(&date.value)?).await?;
+                    log::info!("inserted rates for {}", date.value.to_string());
+                }
+            }
+        }
+        Ordering::Less => {
+            return Err(anyhow!(
+                    "error, current database rates are younger than fetched from ECB"
+            ))
+        }
     }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct Db {
+    inner: Arc<sled::Db>,
+}
+
+impl Db {
 
     fn open<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         let db = Db {
@@ -142,49 +190,6 @@ impl Db {
 
         let t = bincode::deserialize::<T>(&blob)?;
         Ok(Some(t))
-    }
-
-    pub async fn update(&self) -> Result<(), Error> {
-        let current = currencies::fetch_daily().await?.value_as_date()?;
-        let db_current = self.get_current_rates().await?.value_as_date()?;
-
-        match current.cmp(&db_current) {
-            Ordering::Equal => {
-                log::debug!("database currencies up to date");
-                return Ok(());
-            }
-
-            Ordering::Greater => {
-                log::debug!("going to update database with new currencies");
-                let mut dates = match current - db_current {
-                    d if d > Duration::days(90) => currencies::fetch_hist().await?,
-                    d if d < Duration::days(90) && d > Duration::days(1) => {
-                        currencies::fetch_last90().await?
-                    }
-                    _ => vec![currencies::fetch_daily().await?],
-                };
-
-                for date in dates.iter_mut().rev() {
-                    if date.value_as_date()? > db_current {
-                        let day = &date_as_key(&date.value)?;
-                        //insert EUR base
-                        date.currencies.push(Currency {
-                            name: "EUR".to_string(),
-                            rate: 1.0,
-                        });
-                        self.put(&day, &date).await?;
-                        self.put(b"current", &date_as_key(&date.value)?).await?;
-                        log::info!("inserted rates for {}", date.value.to_string());
-                    }
-                }
-            }
-            Ordering::Less => {
-                return Err(anyhow!(
-                    "error, current database rates are younger than fetched from ECB"
-                ))
-            }
-        }
-        Ok(())
     }
 
     async fn execute<F, T>(&self, f: F) -> T
