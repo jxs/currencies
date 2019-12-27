@@ -3,17 +3,20 @@ use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Error};
+// use anyhow::{anyhow, Context, Error};
+use crate::errors::Error;
 use chrono::naive::NaiveDate;
 use chrono::Duration;
 use serde::{de::DeserializeOwned, Serialize};
 use sled::IVec;
-use tokio_executor::blocking;
 
-use crate::currencies::{self, Currency, Date};
+use crate::fetcher::{self, Currency, Date};
 
 pub fn date_as_key(date: &str) -> Result<Vec<u8>, Error> {
-    let date = NaiveDate::from_str(date)?
+    let date = NaiveDate::from_str(date)
+        .map_err(|err| {
+            Error::DateParseError(format!("could not parse {} as NaiveDate, {}", date, err))
+        })?
         .and_hms(0, 0, 0)
         .timestamp()
         .to_be_bytes()
@@ -21,51 +24,55 @@ pub fn date_as_key(date: &str) -> Result<Vec<u8>, Error> {
     Ok(date)
 }
 
-
 pub async fn init<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
-        if path.as_ref().exists() {
-            log::info!("previous db file found, going to open it");
-            Db::open(path)
-        } else {
-            bootstrap_new(path).await
-        }
+    if path.as_ref().exists() {
+        log::info!("previous db file found, going to open it");
+        Db::open(path)
+    } else {
+        bootstrap_new(path).await
+    }
 }
 
 // bootstrap a new database by fetching all histrical reference rates from ECB
 async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
+    log::info!("no database found, going to bootstrap a new one");
+    log::info!("dowloading ECB's currency values since 99");
+    let dates = crate::fetcher::fetch_hist().await.map_err(|err| {
+        Error::DatabaseError(format!(
+            "could not fetch Historical reference rates from ECB, {}",
+            err
+        ))
+    })?;
 
-        log::info!("no database found, going to bootstrap a new one");
-        log::info!("dowloading ECB's currency values since 99");
-        let dates = crate::currencies::fetch_hist()
-            .await
-            .with_context(|| "could not fetch Historical reference rates from ECB".to_string())?;
+    log::info!("populating new db with currency values");
+    let current_date = dates.first().ok_or_else(|| {
+        Error::DatabaseError("fetched Historical reference rates from ECB are empy".to_string())
+    })?;
 
-        log::info!("populating new db with currency values");
-        let current_date = dates
-            .first()
-            .ok_or_else(|| anyhow!("fetched Historical reference rates from ECB are empy"))?;
+    let db = Db::open(path)?;
 
-        let db = Db::open(path)?;
+    db.put(b"current", &date_as_key(&current_date.value)?)
+        .await?;
+    for mut date in dates {
+        let day = &date_as_key(&date.value)?;
+        //insert EUR base
+        date.currencies.push(Currency {
+            name: "EUR".to_string(),
+            rate: 1.0,
+        });
+        db.put(&day, &date).await?;
+    }
+    db.inner
+        .flush_async()
+        .await
+        .map_err(|err| Error::DatabaseError(format!("could not flush database, {}", err)))?;
 
-        db.put(b"current", &date_as_key(&current_date.value)?)
-            .await?;
-        for mut date in dates {
-            let day = &date_as_key(&date.value)?;
-            //insert EUR base
-            date.currencies.push(Currency {
-                name: "EUR".to_string(),
-                rate: 1.0,
-            });
-            db.put(&day, &date).await?;
-        }
-        db.inner.flush_async().await?;
-
-        Ok(db)
+    Ok(db)
 }
 
 // check if there are any missing currencies days and if so fetch and add them to the database
 pub async fn update(db: &Db) -> Result<(), Error> {
-    let current = currencies::fetch_daily().await?.value_as_date()?;
+    let current = fetcher::fetch_daily().await?.value_as_date()?;
     let db_current = db.get_current_rates().await?.value_as_date()?;
 
     match current.cmp(&db_current) {
@@ -77,11 +84,11 @@ pub async fn update(db: &Db) -> Result<(), Error> {
         Ordering::Greater => {
             log::debug!("going to update database with new currencies");
             let mut dates = match current - db_current {
-                d if d > Duration::days(90) => currencies::fetch_hist().await?,
+                d if d > Duration::days(90) => fetcher::fetch_hist().await?,
                 d if d < Duration::days(90) && d > Duration::days(1) => {
-                    currencies::fetch_last90().await?
+                    fetcher::fetch_last90().await?
                 }
-                _ => vec![currencies::fetch_daily().await?],
+                _ => vec![fetcher::fetch_daily().await?],
             };
 
             for date in dates.iter_mut().rev() {
@@ -99,8 +106,8 @@ pub async fn update(db: &Db) -> Result<(), Error> {
             }
         }
         Ordering::Less => {
-            return Err(anyhow!(
-                    "error, current database rates are younger than fetched from ECB"
+            return Err(Error::DatabaseError(
+                "error, current database rates are younger than fetched from ECB".into(),
             ))
         }
     }
@@ -113,24 +120,23 @@ pub struct Db {
 }
 
 impl Db {
-
     fn open<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         let db = Db {
-            inner: Arc::new(sled::Db::open(&path)?),
+            inner: Arc::new(sled::Db::open(&path).map_err(|err| {
+                Error::DatabaseError(format!("could not open database, {}", err))
+            })?),
         };
         Ok(db)
     }
 
     pub async fn get_current_rates(&self) -> Result<Date, Error> {
-        let current = self
-            .get::<Vec<u8>>(b"current")
-            .await?
-            .ok_or_else(|| anyhow!("could not find `current` key on the database"))?;
+        let current = self.get::<Vec<u8>>(b"current").await?.ok_or_else(|| {
+            Error::DatabaseError("could not find `current` key on the database".into())
+        })?;
 
-        let date = self
-            .get::<Date>(&current)
-            .await?
-            .ok_or_else(|| anyhow!("could not find `current` reference rates on the database"))?;
+        let date = self.get::<Date>(&current).await?.ok_or_else(|| {
+            Error::DatabaseError("could not find `current` reference rates on the database".into())
+        })?;
 
         Ok(date)
     }
@@ -153,12 +159,20 @@ impl Db {
         let dates = self
             .execute(move |db| {
                 db.range(range_start..=range_end)
-                    .map(|result| {
-                        let (_key, value) = result.unwrap();
-                        bincode::deserialize::<Date>(&value)
+                    .map(|result| match result {
+                        Ok((key, value)) => bincode::deserialize::<Date>(&value).map_err(|err| {
+                            Error::DatabaseError(format!(
+                                "could not deseiralize database key: {}, {}",
+                                String::from_utf8_lossy(&key),
+                                err
+                            ))
+                        }),
+                        Err(err) => Err(Error::DatabaseError(format!(
+                            "could not get range from db, {}",
+                            err
+                        ))),
                     })
-                    .collect::<Result<Vec<Date>, _>>()
-                    .with_context(|| "could not get range from db".to_string())
+                    .collect::<Result<Vec<Date>, Error>>()
             })
             .await?;
         Ok(dates)
@@ -169,12 +183,25 @@ impl Db {
         T: Serialize,
     {
         let key = key.to_vec();
-        let encoded: Vec<u8> = bincode::serialize(value)?;
-        let db = self.inner.clone();
+        let encoded: Vec<u8> = bincode::serialize(value).map_err(|_| {
+            Error::DatabaseError(format!(
+                "could not bincode serialize key {}",
+                String::from_utf8_lossy(&key)
+            ))
+        })?;
 
-        blocking::run(move || db.insert(&key, encoded))
-            .await
-            .map_err(|e| e.into())
+        self.execute({
+            let key = key.clone();
+            move |db| db.insert(&key, encoded)
+        })
+        .await
+        .map_err(|err| {
+            Error::DatabaseError(format!(
+                "could not put key {} on the database, {}",
+                String::from_utf8_lossy(&key),
+                err
+            ))
+        })
     }
 
     async fn get<T>(&self, key: &[u8]) -> Result<Option<T>, Error>
@@ -182,13 +209,29 @@ impl Db {
         T: DeserializeOwned + Send + 'static,
     {
         let key = key.to_vec();
-        let opt = self.execute(move |db| db.get(&key)).await?;
+        let opt = self
+            .execute({
+                let key = key.clone();
+                move |db| {
+                    db.get(&key).map_err(|err| {
+                        Error::DatabaseError(format!(
+                            "could not get key {} from database, {}",
+                            String::from_utf8_lossy(&key),
+                            err
+                        ))
+                    })
+                }
+            })
+            .await?;
         let blob = match opt {
             Some(blob) => blob,
             None => return Ok(None),
         };
 
-        let t = bincode::deserialize::<T>(&blob)?;
+        let t = bincode::deserialize::<T>(&blob).map_err(|err| {
+            Error::DatabaseError(format!("could not deserialize blob from database, {}", err))
+        })?;
+
         Ok(Some(t))
     }
 
@@ -198,7 +241,11 @@ impl Db {
         T: Send + 'static,
     {
         let db = self.inner.clone();
-        tokio_executor::blocking::run(|| f(db)).await
+        // blocking in place is faster for file operations which may or may not block:
+        // https://github.com/tokio-rs/tokio/issues/1532#issuecomment-530885577
+        tokio::spawn(async { tokio::task::block_in_place(|| f(db)) })
+            .await
+            .expect("error awaiting tokio future!")
     }
 }
 
@@ -208,13 +255,13 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_date_as_key() {
+    fn _date_as_key() {
         let key = date_as_key("1999-01-04").unwrap();
         assert_eq!(key, vec![0, 0, 0, 0, 54, 144, 4, 128]);
     }
 
-    #[tokio::test]
-    async fn test_put_get() {
+    #[tokio::test(threaded_scheduler)]
+    async fn put_get() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
         let db = Db::open(path.join("db")).unwrap();
@@ -229,8 +276,8 @@ mod tests {
         assert_eq!(date, date2);
     }
 
-    #[tokio::test]
-    async fn test_get_current_rates() {
+    #[tokio::test(threaded_scheduler)]
+    async fn get_current_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
         let db = Db::open(path.join("db")).unwrap();
@@ -246,8 +293,8 @@ mod tests {
         assert_eq!(date, current);
     }
 
-    #[tokio::test]
-    async fn test_get_day_rates() {
+    #[tokio::test(threaded_scheduler)]
+    async fn get_day_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
         let db = Db::open(path.join("db")).unwrap();
@@ -262,8 +309,8 @@ mod tests {
         assert_eq!(date, current);
     }
 
-    #[tokio::test]
-    async fn test_get_range_rates() {
+    #[tokio::test(threaded_scheduler)]
+    async fn get_range_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
         let db = Db::open(path.join("db")).unwrap();

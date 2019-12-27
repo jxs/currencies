@@ -1,6 +1,5 @@
-use anyhow::{anyhow, Error};
+use crate::errors::Error;
 use chrono::NaiveDate;
-use futures::TryStreamExt;
 use hyper::Client;
 use hyper_rustls::HttpsConnector;
 use serde::{Deserialize, Serialize};
@@ -32,7 +31,7 @@ pub struct Date {
 
 impl Date {
     pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
-        NaiveDate::from_str(&self.value).map_err(|e| anyhow!("could not parse value as date {}", e))
+        NaiveDate::from_str(&self.value).map_err(|_| Error::DateParseError(self.value.clone()))
     }
 }
 
@@ -55,17 +54,25 @@ pub async fn fetch_daily() -> Result<Date, Error> {
     let mut dates = fetch(ECB_DAILY).await?;
     let dates = dates
         .pop()
-        .ok_or_else(|| anyhow!("Daily rates fetched from ECB are empty"))?;
+        .ok_or_else(|| Error::FetcherError("Daily rates are empty".into()))?;
     Ok(dates)
 }
 
 pub async fn fetch(url: &str) -> Result<Vec<Date>, Error> {
     let https = HttpsConnector::new();
     let client: Client<_, hyper::Body> = Client::builder().build(https);
-    let res = client.get(url.parse::<hyper::Uri>()?).await?;
-    let body = res.into_body().try_concat().await?;
+    let res =
+        client
+            .get(url.parse::<hyper::Uri>().map_err(|err| {
+                Error::FetcherError(format!("could not parse url: {}, {}", url, err))
+            })?)
+            .await
+            .map_err(|err| Error::FetcherError(err.to_string()))?;
+    let body = hyper::body::to_bytes(res.into_body())
+        .await
+        .map_err(|err| Error::FetcherError(err.to_string()))?;
     let envelope: Envelope = serde_xml_rs::from_reader(body.as_ref())
-        .map_err(|err| anyhow!("error parsing curencies from ECB {}", err))?;
+        .map_err(|err| Error::FetcherError(err.to_string()))?;
     Ok(envelope.cube.dates)
 }
 
@@ -74,13 +81,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_fetch() {
+    async fn fetch() {
         let current = fetch_daily().await.unwrap();
         current.value_as_date().unwrap();
     }
 
     #[test]
-    fn test_value_as_date() {
+    fn value_as_date() {
         let date = Date {
             value: "1999-01-04".to_string(),
             currencies: Vec::new(),

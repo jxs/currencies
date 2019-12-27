@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use askama::Template;
 
-use crate::currencies::Currency;
 use crate::db::Db;
+use crate::errors::Error;
+use crate::fetcher::Currency;
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -30,10 +31,7 @@ fn sort_currencies(currencies: &mut Vec<Currency>) {
 }
 
 pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
-    let mut date = db
-        .get_current_rates()
-        .await
-        .map_err(warp::reject::custom)?;
+    let mut date = db.get_current_rates().await?;
 
     sort_currencies(&mut date.currencies);
     let rendered = CurrenciesTemplate {
@@ -41,17 +39,17 @@ pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
         currencies: date.currencies.as_slice(),
     }
     .render()
-    .map_err(warp::reject::custom)?;
+    .map_err(|err| Error::TemplateError(err.to_string()))?;
 
     Ok(warp::reply::html(rendered))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{sort_currencies, Currency};
+    use super::Currency;
 
     #[test]
-    fn test_sort_currencies() {
+    fn sort_currencies() {
         let mut currencies = Vec::new();
         currencies.push(Currency {
             name: "JPY".to_string(),
@@ -85,7 +83,7 @@ mod tests {
             name: "RUB".to_string(),
             rate: 0.0,
         });
-        sort_currencies(&mut currencies);
+        super::sort_currencies(&mut currencies);
         assert_eq!(&currencies[0].name, "EUR");
         assert_eq!(&currencies[1].name, "USD");
         assert_eq!(&currencies[2].name, "GBP");

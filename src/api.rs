@@ -1,12 +1,11 @@
-use crate::currencies::Date;
 use crate::db::Db;
+use crate::errors::Error;
+use crate::fetcher::Date;
 
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::errors::Reject;
-use anyhow::anyhow;
 use chrono::NaiveDate;
 use serde::Deserialize;
 use serde_json::json;
@@ -26,7 +25,7 @@ pub fn routes(db: Arc<Db>) -> impl Filter<Extract = (impl Reply,), Error = Rejec
     let latest_get = apiv1
         .and(warp::path("latest"))
         .and(warp::path::end())
-        .and(warp::get2())
+        .and(warp::get())
         .and(warp::query::<Params>())
         .and(db.clone())
         .and_then(latest_handler);
@@ -34,7 +33,7 @@ pub fn routes(db: Arc<Db>) -> impl Filter<Extract = (impl Reply,), Error = Rejec
     let history_get = apiv1
         .and(warp::path("history"))
         .and(warp::path::end())
-        .and(warp::get2())
+        .and(warp::get())
         .and(warp::query::<Params>())
         .and(db.clone())
         .and_then(history_handler);
@@ -42,7 +41,7 @@ pub fn routes(db: Arc<Db>) -> impl Filter<Extract = (impl Reply,), Error = Rejec
     let day_get = apiv1
         .and(warp::path::param::<NaiveDate>())
         .and(warp::path::end())
-        .and(warp::get2())
+        .and(warp::get())
         .and(warp::query::<Params>())
         .and(db)
         .and_then(day_handler);
@@ -59,10 +58,8 @@ struct Params {
 }
 
 async fn latest_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Rejection> {
-    let currencies = db
-        .get_current_rates()
-        .await
-        .map_err(|e| warp::reject::custom(Reject::Unhandled(e.into())))?;
+    let currencies = db.get_current_rates().await?;
+
     Ok(try_reply(vec![currencies], params)?)
 }
 
@@ -72,14 +69,13 @@ async fn day_handler(
     db: Arc<Db>,
 ) -> Result<impl Reply, Rejection> {
     if date < NaiveDate::from_ymd(1999, 1, 4) {
-        return Err(warp::reject::custom(Reject::PastDate("date")));
+        return Err(Error::PastDate("date").into());
     }
 
     let currencies = db
         .get_day_rates(&date.to_string())
-        .await
-        .map_err(|e| warp::reject::custom(Reject::Unhandled(e.into())))?
-        .ok_or_else(move || warp::reject::custom(Reject::DateNotFound(date.to_string())))?;
+        .await?
+        .ok_or_else(move || Error::DateNotFound(date.to_string()))?;
 
     Ok(try_reply(vec![currencies], params)?)
 }
@@ -91,40 +87,32 @@ async fn history_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Reje
             end_at: Some(ref end_at),
             ..
         } => {
-            let start_at = NaiveDate::from_str(start_at).map_err(move |_| {
-                warp::reject::custom(Reject::InvalidDateFormat("start_at", start_at.to_string()))
-            })?;
+            let start_at = NaiveDate::from_str(start_at)
+                .map_err(move |_| Error::InvalidDateFormat("start_at", start_at.to_string()))?;
 
-            let end_at = NaiveDate::from_str(end_at).map_err(move |_| {
-                warp::reject::custom(Reject::InvalidDateFormat("end_at", end_at.to_string()))
-            })?;
+            let end_at = NaiveDate::from_str(end_at)
+                .map_err(move |_| Error::InvalidDateFormat("end_at", end_at.to_string()))?;
 
             if start_at < NaiveDate::from_ymd(1999, 1, 4) {
-                return Err(warp::reject::custom(Reject::PastDate("start_at")));
+                return Err(Error::PastDate("start_at").into());
             }
 
             if end_at < start_at {
-                return Err(warp::reject::custom(Reject::InvalidDateRange));
+                return Err(Error::InvalidDateRange.into());
             }
 
             (start_at, end_at)
         }
-        _ => return Err(warp::reject::custom(Reject::MissingDateBoundaries)),
+        _ => return Err(Error::MissingDateBoundaries.into()),
     };
 
-    let currencies = db
-        .get_range_rates(start_at, end_at)
-        .await
-        .map_err(|e| warp::reject::custom(Reject::Unhandled(e.into())))?;
+    let currencies = db.get_range_rates(start_at, end_at).await?;
+
     Ok(try_reply(currencies, params)?)
 }
 
 fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> {
-    let first = dates.get(0).ok_or_else(|| {
-        warp::reject::custom(Reject::Unhandled(
-            anyhow!("empty currency dataset, should have at least 1 element").into(),
-        ))
-    })?;
+    let first = dates.get(0).ok_or_else(|| Error::EmpyDataset)?;
 
     let symbols = match params.symbols {
         Some(symbols_params) => {
@@ -136,7 +124,7 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
                 .iter()
                 .all(|s| first.currencies.iter().any(|c| &c.name == s))
             {
-                return Err(warp::reject::custom(Reject::InvalidSymbol));
+                return Err(Error::InvalidSymbol.into());
             }
             symbols
         }
@@ -155,7 +143,7 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
                 .iter()
                 .find(|b| &b.name == base)
                 .map(|b| b.rate)
-                .ok_or_else(|| warp::reject::custom(Reject::InvalidBase(base.to_string())))?,
+                .ok_or_else(|| Error::InvalidBase(base.to_string()))?,
         };
 
         for currency in date.currencies.into_iter() {
@@ -169,6 +157,7 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
 
     let base = params.base.unwrap_or_else(|| "EUR".to_string());
     let response = if rates.len() < 2 {
+        // safe to call unwrap as we have already checked dates have at least one element
         let (date, rates) = rates.into_iter().next().unwrap();
         json! ({
             "rates": rates,
@@ -189,12 +178,11 @@ fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::currencies::Envelope;
-    use futures::TryStreamExt;
+    use crate::fetcher::Envelope;
     use std::fs::File;
 
     #[test]
-    fn test_try_reply_returns_err_on_empty_dates() {
+    fn try_reply_returns_err_on_empty_dates() {
         let dates = Vec::new();
         let params = Params::default();
         let reply = try_reply(dates, params);
@@ -202,7 +190,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_multiple_days() {
+    async fn try_reply_multiple_days() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let dates = envelope.cube.dates;
@@ -219,7 +207,7 @@ mod tests {
         params.start_at = Some("2019-07-22".to_string());
         params.end_at = Some("2019-10-18".to_string());
         let response = try_reply(dates, params).unwrap().into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let json = json!({
             "rates": rates,
@@ -231,7 +219,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_single_day() {
+    async fn try_reply_single_day() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let mut dates = envelope.cube.dates;
@@ -248,7 +236,7 @@ mod tests {
         let response = try_reply(vec![dates.pop().unwrap()], params)
             .unwrap()
             .into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let day_rate = rates.remove("2019-07-22").unwrap();
         let json = json!({
@@ -260,7 +248,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_symbols_single_day() {
+    async fn try_reply_symbols_single_day() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let mut dates = envelope.cube.dates;
@@ -280,7 +268,7 @@ mod tests {
         let response = try_reply(vec![dates.pop().unwrap()], params)
             .unwrap()
             .into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let day_rate = rates.remove("2019-07-22").unwrap();
         let json = json!({
@@ -292,7 +280,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_symbols_multiple_days() {
+    async fn try_reply_symbols_multiple_days() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let dates = envelope.cube.dates;
@@ -312,7 +300,7 @@ mod tests {
         params.end_at = Some("2019-10-18".to_string());
         params.symbols = Some("USD,JPY".to_string());
         let response = try_reply(dates, params).unwrap().into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let json = json!({
             "rates": rates,
@@ -324,7 +312,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_different_base_single_day() {
+    async fn try_reply_different_base_single_day() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let mut dates = envelope.cube.dates;
@@ -349,7 +337,7 @@ mod tests {
         let response = try_reply(vec![dates.pop().unwrap()], params)
             .unwrap()
             .into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let day_rate = rates.remove("2019-07-22").unwrap();
         let json = json!({
@@ -361,7 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_try_reply_different_base_multiple_days() {
+    async fn try_reply_different_base_multiple_days() {
         let file = File::open("seed_rates.xml").unwrap();
         let envelope: Envelope = serde_xml_rs::from_reader(&file).unwrap();
         let dates = envelope.cube.dates;
@@ -377,7 +365,6 @@ mod tests {
                     .unwrap();
 
                 currencies.insert(currency.name.to_string(), currency.rate / rate);
-
             }
             rates.insert(date.value, currencies);
         }
@@ -387,7 +374,7 @@ mod tests {
         params.start_at = Some("2019-07-22".to_string());
         params.end_at = Some("2019-10-18".to_string());
         let response = try_reply(dates, params).unwrap().into_response();
-        let body = response.into_body().try_concat().await.unwrap();
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();
         let json = json!({
             "rates": rates,

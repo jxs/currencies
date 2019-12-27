@@ -4,18 +4,15 @@ version = "0.1.0"
 authors = ["João Oliveira <hello@jxs.pt>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 askama = "0.8.0"
-hyper = "0.13.0-alpha.2"
+hyper = "0.13"
 warp =  { git = "https://github.com/seanmonstar/warp.git" }
-hyper-rustls = { git = "https://github.com/CryZe/hyper-rustls.git", branch = "beta-compatibility" }
+hyper-rustls = "0.19"
 serde-xml-rs = "0.3.1"
-tokio = "0.2.0-alpha.6"
-tokio-executor = "=0.2.0-alpha.6"
+tokio = "0.2.6"
 serde = { version = "1.0", features = ["derive"] }
-futures-preview = "0.3.0-alpha.19"
+futures = "0.3.1"
 log = "0.4.8"
 env_logger = "0.7.0"
 bincode = "1.2.0"
@@ -23,7 +20,7 @@ chrono = "0.4.9"
 exitfailure = "0.5.1"
 serde_json = "1.0.40"
 sled = "0.28.0"
-anyhow = "1.0.13"
+thiserror = "1.0.9"
 
 [dev-dependencies]
 tempfile = "3.1.0"
