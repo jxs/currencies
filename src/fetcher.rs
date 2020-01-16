@@ -1,4 +1,4 @@
-use crate::errors::Error;
+use crate::error::Error;
 use chrono::NaiveDate;
 use hyper::Client;
 use hyper_rustls::HttpsConnector;
@@ -31,7 +31,12 @@ pub struct Date {
 
 impl Date {
     pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
-        NaiveDate::from_str(&self.value).map_err(|_| Error::DateParseError(self.value.clone()))
+        NaiveDate::from_str(&self.value).map_err(|err| {
+            Error::DateParseError(
+                format!("could not parse {} as NaiveDate", self.value.clone()),
+                err,
+            )
+        })
     }
 }
 

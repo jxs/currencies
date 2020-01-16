@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 // use anyhow::{anyhow, Context, Error};
-use crate::errors::Error;
+use crate::error::Error;
 use chrono::naive::NaiveDate;
 use chrono::Duration;
 use serde::{de::DeserializeOwned, Serialize};
@@ -15,7 +15,7 @@ use crate::fetcher::{self, Currency, Date};
 pub fn date_as_key(date: &str) -> Result<Vec<u8>, Error> {
     let date = NaiveDate::from_str(date)
         .map_err(|err| {
-            Error::DateParseError(format!("could not parse {} as NaiveDate, {}", date, err))
+            Error::DateParseError(format!("could not parse {} as NaiveDate", date), err)
         })?
         .and_hms(0, 0, 0)
         .timestamp()
@@ -38,15 +38,18 @@ async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
     log::info!("no database found, going to bootstrap a new one");
     log::info!("dowloading ECB's currency values since 99");
     let dates = crate::fetcher::fetch_hist().await.map_err(|err| {
-        Error::DatabaseError(format!(
-            "could not fetch Historical reference rates from ECB, {}",
-            err
-        ))
+        Error::DatabaseError(
+            "could not fetch Historical reference rates from ECB".into(),
+            Some(err.into()),
+        )
     })?;
 
     log::info!("populating new db with currency values");
     let current_date = dates.first().ok_or_else(|| {
-        Error::DatabaseError("fetched Historical reference rates from ECB are empy".to_string())
+        Error::DatabaseError(
+            "fetched Historical reference rates from ECB are empy".into(),
+            None,
+        )
     })?;
 
     let db = Db::open(path)?;
@@ -65,7 +68,7 @@ async fn bootstrap_new<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
     db.inner
         .flush_async()
         .await
-        .map_err(|err| Error::DatabaseError(format!("could not flush database, {}", err)))?;
+        .map_err(|err| Error::DatabaseError("could not flush database".into(), Some(err.into())))?;
 
     Ok(db)
 }
@@ -108,6 +111,7 @@ pub async fn update(db: &Db) -> Result<(), Error> {
         Ordering::Less => {
             return Err(Error::DatabaseError(
                 "error, current database rates are younger than fetched from ECB".into(),
+                None,
             ))
         }
     }
@@ -123,7 +127,7 @@ impl Db {
     fn open<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         let db = Db {
             inner: Arc::new(sled::Db::open(&path).map_err(|err| {
-                Error::DatabaseError(format!("could not open database, {}", err))
+                Error::DatabaseError("could not open database".into(), Some(err.into()))
             })?),
         };
         Ok(db)
@@ -131,11 +135,14 @@ impl Db {
 
     pub async fn get_current_rates(&self) -> Result<Date, Error> {
         let current = self.get::<Vec<u8>>(b"current").await?.ok_or_else(|| {
-            Error::DatabaseError("could not find `current` key on the database".into())
+            Error::DatabaseError("could not find `current` key on the database".into(), None)
         })?;
 
         let date = self.get::<Date>(&current).await?.ok_or_else(|| {
-            Error::DatabaseError("could not find `current` reference rates on the database".into())
+            Error::DatabaseError(
+                "could not find `current` reference rates on the database".into(),
+                None,
+            )
         })?;
 
         Ok(date)
@@ -161,16 +168,18 @@ impl Db {
                 db.range(range_start..=range_end)
                     .map(|result| match result {
                         Ok((key, value)) => bincode::deserialize::<Date>(&value).map_err(|err| {
-                            Error::DatabaseError(format!(
-                                "could not deseiralize database key: {}, {}",
-                                String::from_utf8_lossy(&key),
-                                err
-                            ))
+                            Error::DatabaseError(
+                                format!(
+                                    "could not deseiralize database key: {}",
+                                    String::from_utf8_lossy(&key)
+                                ),
+                                Some(err.into()),
+                            )
                         }),
-                        Err(err) => Err(Error::DatabaseError(format!(
-                            "could not get range from db, {}",
-                            err
-                        ))),
+                        Err(err) => Err(Error::DatabaseError(
+                            "could not get range from db".into(),
+                            Some(err.into()),
+                        )),
                     })
                     .collect::<Result<Vec<Date>, Error>>()
             })
@@ -183,11 +192,14 @@ impl Db {
         T: Serialize,
     {
         let key = key.to_vec();
-        let encoded: Vec<u8> = bincode::serialize(value).map_err(|_| {
-            Error::DatabaseError(format!(
-                "could not bincode serialize key {}",
-                String::from_utf8_lossy(&key)
-            ))
+        let encoded: Vec<u8> = bincode::serialize(value).map_err(|err| {
+            Error::DatabaseError(
+                format!(
+                    "could not bincode serialize key {}",
+                    String::from_utf8_lossy(&key)
+                ),
+                Some(err.into()),
+            )
         })?;
 
         self.execute({
@@ -196,11 +208,13 @@ impl Db {
         })
         .await
         .map_err(|err| {
-            Error::DatabaseError(format!(
-                "could not put key {} on the database, {}",
-                String::from_utf8_lossy(&key),
-                err
-            ))
+            Error::DatabaseError(
+                format!(
+                    "could not put key {} on the database",
+                    String::from_utf8_lossy(&key)
+                ),
+                Some(err.into()),
+            )
         })
     }
 
@@ -214,11 +228,13 @@ impl Db {
                 let key = key.clone();
                 move |db| {
                     db.get(&key).map_err(|err| {
-                        Error::DatabaseError(format!(
-                            "could not get key {} from database, {}",
-                            String::from_utf8_lossy(&key),
-                            err
-                        ))
+                        Error::DatabaseError(
+                            format!(
+                                "could not get key {} from database",
+                                String::from_utf8_lossy(&key)
+                            ),
+                            Some(err.into()),
+                        )
                     })
                 }
             })
@@ -229,7 +245,10 @@ impl Db {
         };
 
         let t = bincode::deserialize::<T>(&blob).map_err(|err| {
-            Error::DatabaseError(format!("could not deserialize blob from database, {}", err))
+            Error::DatabaseError(
+                "not deserialize blob from database".into(),
+                Some(err.into()),
+            )
         })?;
 
         Ok(Some(t))

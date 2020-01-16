@@ -1,5 +1,5 @@
 use crate::db::Db;
-use crate::errors::Error;
+use crate::error::Error;
 use crate::fetcher::Date;
 
 use std::collections::HashMap;

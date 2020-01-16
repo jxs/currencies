@@ -1,6 +1,6 @@
 mod api;
 mod db;
-mod errors;
+mod error;
 mod fetcher;
 mod handlers;
 
@@ -8,7 +8,7 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::errors::Error;
+use crate::error::Error;
 use exitfailure::ExitDisplay;
 use futures::StreamExt;
 use warp::Filter;
@@ -17,7 +17,7 @@ use warp::Filter;
 async fn main() -> Result<(), ExitDisplay<Error>> {
     env_logger::init();
     let port = env::var("PORT").unwrap_or_else(|_| "3030".to_string());
-    let port = port.parse().map_err(|_| Error::InvalidPort(port))?;
+    let port = port.parse().map_err(|err| Error::InvalidPort(port, err))?;
 
     let db_location = std::env::var("DB_LOCATION").unwrap_or_else(|_| "db".to_string());
     let db = db::init(&db_location).await?;
@@ -38,7 +38,7 @@ async fn main() -> Result<(), ExitDisplay<Error>> {
         .map(move || db_filter.clone())
         .and_then(handlers::index);
 
-    let routes = api.or(ui).recover(errors::recover);
+    let routes = api.or(ui).recover(error::recover);
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
     Ok(())

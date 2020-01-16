@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::error::Error as StdError;
 use thiserror::Error;
 use warp::http::StatusCode;
 use warp::{Rejection, Reply};
@@ -57,11 +58,11 @@ pub enum Error {
     #[error("no curencies found for date `{0}`")]
     DateNotFound(String),
     #[error("could not parse `{0}` as NaiveDate")]
-    DateParseError(String),
+    DateParseError(String, #[source] chrono::ParseError),
     #[error("`{0}` is invalid, there are no currency rates for dates older then 1999-01-04.")]
     PastDate(&'static str),
     #[error("`{0}` is an invalid port")]
-    InvalidPort(String),
+    InvalidPort(String, #[source] std::num::ParseIntError),
     #[error("start_at must be older than end_at")]
     InvalidDateRange,
     #[error("`{0}`: `{1}` is in an invalid date format, date must be in the format %Y-%m-%d")]
@@ -75,11 +76,11 @@ pub enum Error {
     #[error("both start_at and end_at parameters must be present")]
     MissingDateBoundaries,
     #[error("database error, `{0}`")]
-    DatabaseError(String),
+    DatabaseError(String, #[source] Option<Box<dyn StdError + Sync + Send>>),
     #[error("error fetching currencies from ECB, `{0}`")]
     FetcherError(String),
     #[error("error rendering template, `{0}`")]
-    TemplateError(String),
+    TemplateError(#[source] askama::Error),
 }
 
 impl warp::reject::Reject for Error {}

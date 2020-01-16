@@ -4,7 +4,7 @@ use std::sync::Arc;
 use askama::Template;
 
 use crate::db::Db;
-use crate::errors::Error;
+use crate::error::Error;
 use crate::fetcher::Currency;
 
 #[derive(Template)]
@@ -39,7 +39,7 @@ pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
         currencies: date.currencies.as_slice(),
     }
     .render()
-    .map_err(|err| Error::TemplateError(err.to_string()))?;
+    .map_err(Error::TemplateError)?;
 
     Ok(warp::reply::html(rendered))
 }
