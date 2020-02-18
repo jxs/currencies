@@ -10,7 +10,7 @@ struct ErrorMessage {
     msg: String,
 }
 
-pub async fn recover(err: Rejection) -> Result<Box<dyn Reply>, Rejection> {
+pub async fn recover(err: Rejection) -> Result<impl Reply, Rejection> {
     //api errors should be returned in json
     if let Some(ref err) = err.find::<Error>() {
         let error = match err {
@@ -42,15 +42,13 @@ pub async fn recover(err: Rejection) -> Result<Box<dyn Reply>, Rejection> {
             }
         };
 
-        // cast needed for now:
-        // https://github.com/rust-lang/rust/pull/64999#issuecomment-540622253
-        return Ok(Box::new(warp::reply::with_status(
+        return Ok(warp::reply::with_status(
             warp::reply::json(&error),
             StatusCode::from_u16(error.code).unwrap(),
-        )) as Box<dyn warp::Reply>);
+        ));
     };
 
-    Ok(Box::new(StatusCode::INTERNAL_SERVER_ERROR) as Box<dyn warp::Reply>)
+    Err(err)
 }
 
 #[derive(Error, Debug)]
