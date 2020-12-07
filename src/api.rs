@@ -112,7 +112,7 @@ async fn history_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Reje
 }
 
 fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> {
-    let first = dates.get(0).ok_or_else(|| Error::EmpyDataset)?;
+    let first = dates.get(0).ok_or(Error::EmpyDataset)?;
 
     let symbols = match params.symbols {
         Some(symbols_params) => {
