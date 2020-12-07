@@ -26,7 +26,7 @@ async fn main() -> Result<(), ExitDisplay<Error>> {
     // launch updater daemon
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(360));
-        while let Some(_) = interval.next().await {
+        while interval.next().await.is_some() {
             db::update(&db).await.expect("error updating database!");
         }
     });
