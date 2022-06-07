@@ -56,7 +56,7 @@ pub enum Error {
     #[error("no curencies found for date `{0}`")]
     DateNotFound(String),
     #[error("could not parse `{0}` as NaiveDate")]
-    DateParseError(String, #[source] chrono::ParseError),
+    DateParse(String, #[source] chrono::ParseError),
     #[error("`{0}` is invalid, there are no currency rates for dates older then 1999-01-04.")]
     PastDate(&'static str),
     #[error("`{0}` is an invalid port")]
@@ -74,11 +74,11 @@ pub enum Error {
     #[error("both start_at and end_at parameters must be present")]
     MissingDateBoundaries,
     #[error("database error, `{0}`")]
-    DatabaseError(String, #[source] Option<Box<dyn StdError + Sync + Send>>),
+    Database(String, #[source] Option<Box<dyn StdError + Sync + Send>>),
     #[error("error fetching currencies from ECB, `{0}`")]
-    FetcherError(String),
+    Fetcher(String),
     #[error("error rendering template, `{0}`")]
-    TemplateError(#[source] askama::Error),
+    Template(#[source] askama::Error),
 }
 
 impl warp::reject::Reject for Error {}
