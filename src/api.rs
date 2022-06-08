@@ -60,7 +60,7 @@ struct Params {
 async fn latest_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Rejection> {
     let currencies = db.get_current_rates().await?;
 
-    Ok(try_reply(vec![currencies], params)?)
+    try_reply(vec![currencies], params)
 }
 
 async fn day_handler(
@@ -77,7 +77,7 @@ async fn day_handler(
         .await?
         .ok_or_else(move || Error::DateNotFound(date.to_string()))?;
 
-    Ok(try_reply(vec![currencies], params)?)
+    try_reply(vec![currencies], params)
 }
 
 async fn history_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Rejection> {
@@ -108,7 +108,7 @@ async fn history_handler(params: Params, db: Arc<Db>) -> Result<impl Reply, Reje
 
     let currencies = db.get_range_rates(start_at, end_at).await?;
 
-    Ok(try_reply(currencies, params)?)
+    try_reply(currencies, params)
 }
 
 fn try_reply(dates: Vec<Date>, params: Params) -> Result<impl Reply, Rejection> {
@@ -203,9 +203,11 @@ mod tests {
             rates.insert(date.value, currencies);
         }
 
-        let mut params = Params::default();
-        params.start_at = Some("2019-07-22".to_string());
-        params.end_at = Some("2019-10-18".to_string());
+        let mut params = Params {
+            start_at: Some("2019-07-22".to_string()),
+            end_at: Some("2019-10-18".to_string()),
+            ..Default::default()
+        };
         let response = try_reply(dates, params).unwrap().into_response();
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         let body_str = String::from_utf8(body.as_ref().to_vec()).unwrap();

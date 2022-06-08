@@ -11,6 +11,7 @@ use std::time::Duration;
 use crate::error::Error;
 use exitfailure::ExitDisplay;
 use futures::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
 use warp::Filter;
 
 #[tokio::main]
@@ -25,8 +26,9 @@ async fn main() -> Result<(), ExitDisplay<Error>> {
 
     // launch updater daemon
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(360));
-        while interval.next().await.is_some() {
+        let interval = tokio::time::interval(Duration::from_secs(360));
+        let mut interval_stream = IntervalStream::new(interval);
+        while interval_stream.next().await.is_some() {
             db::update(&db).await.expect("error updating database!");
         }
     });

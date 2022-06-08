@@ -1,7 +1,7 @@
 use crate::error::Error;
 use chrono::NaiveDate;
 use hyper::Client;
-use hyper_rustls::HttpsConnector;
+use hyper_rustls::HttpsConnectorBuilder;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -32,7 +32,7 @@ pub struct Date {
 impl Date {
     pub fn value_as_date(&self) -> Result<NaiveDate, Error> {
         NaiveDate::from_str(&self.value).map_err(|err| {
-            Error::DateParseError(
+            Error::DateParse(
                 format!("could not parse {} as NaiveDate", self.value.clone()),
                 err,
             )
@@ -59,25 +59,29 @@ pub async fn fetch_daily() -> Result<Date, Error> {
     let mut dates = fetch(ECB_DAILY).await?;
     let dates = dates
         .pop()
-        .ok_or_else(|| Error::FetcherError("Daily rates are empty".into()))?;
+        .ok_or_else(|| Error::Fetcher("Daily rates are empty".into()))?;
     Ok(dates)
 }
 
 pub async fn fetch(url: &str) -> Result<Vec<Date>, Error> {
-    let https = HttpsConnector::new();
+    let https = HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_only()
+        .enable_http1()
+        .build();
     let client: Client<_, hyper::Body> = Client::builder().build(https);
-    let res =
-        client
-            .get(url.parse::<hyper::Uri>().map_err(|err| {
-                Error::FetcherError(format!("could not parse url: {}, {}", url, err))
-            })?)
-            .await
-            .map_err(|err| Error::FetcherError(err.to_string()))?;
+    let res = client
+        .get(
+            url.parse::<hyper::Uri>()
+                .map_err(|err| Error::Fetcher(format!("could not parse url: {}, {}", url, err)))?,
+        )
+        .await
+        .map_err(|err| Error::Fetcher(err.to_string()))?;
     let body = hyper::body::to_bytes(res.into_body())
         .await
-        .map_err(|err| Error::FetcherError(err.to_string()))?;
-    let envelope: Envelope = serde_xml_rs::from_reader(body.as_ref())
-        .map_err(|err| Error::FetcherError(err.to_string()))?;
+        .map_err(|err| Error::Fetcher(err.to_string()))?;
+    let envelope: Envelope =
+        serde_xml_rs::from_reader(body.as_ref()).map_err(|err| Error::Fetcher(err.to_string()))?;
     Ok(envelope.cube.dates)
 }
 

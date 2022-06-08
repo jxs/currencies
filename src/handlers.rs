@@ -15,7 +15,7 @@ struct CurrenciesTemplate<'a> {
 }
 
 // order currencies so that EUR comes first then gomes USD and then GBP
-fn sort_currencies(currencies: &mut Vec<Currency>) {
+fn sort_currencies(currencies: &mut [Currency]) {
     currencies.sort_by(
         |curr1, curr2| match (curr1.name.as_ref(), curr2.name.as_ref()) {
             ("EUR", _) => Ordering::Less,
@@ -39,7 +39,7 @@ pub async fn index(db: Arc<Db>) -> Result<impl warp::Reply, warp::Rejection> {
         currencies: date.currencies.as_slice(),
     }
     .render()
-    .map_err(Error::TemplateError)?;
+    .map_err(Error::Template)?;
 
     Ok(warp::reply::html(rendered))
 }
