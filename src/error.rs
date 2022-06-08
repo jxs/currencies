@@ -82,9 +82,3 @@ pub enum Error {
 }
 
 impl warp::reject::Reject for Error {}
-
-impl From<Error> for warp::reject::Rejection {
-    fn from(error: Error) -> warp::reject::Rejection {
-        warp::reject::custom(error)
-    }
-}

@@ -1,7 +1,7 @@
 use crate::error::Error;
 use chrono::NaiveDate;
 use hyper::Client;
-use hyper_rustls::HttpsConnector;
+use hyper_rustls::HttpsConnectorBuilder;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -64,7 +64,11 @@ pub async fn fetch_daily() -> Result<Date, Error> {
 }
 
 pub async fn fetch(url: &str) -> Result<Vec<Date>, Error> {
-    let https = HttpsConnector::new();
+    let https = HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_only()
+        .enable_http1()
+        .build();
     let client: Client<_, hyper::Body> = Client::builder().build(https);
     let res = client
         .get(

@@ -124,7 +124,7 @@ pub struct Db {
 impl Db {
     fn open<P: AsRef<Path>>(path: P) -> Result<Db, Error> {
         let db = Db {
-            inner: Arc::new(sled::Db::open(&path).map_err(|err| {
+            inner: Arc::new(sled::open(&path).map_err(|err| {
                 Error::Database("could not open database".into(), Some(err.into()))
             })?),
         };
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(key, vec![0, 0, 0, 0, 54, 144, 4, 128]);
     }
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn put_get() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
@@ -293,7 +293,7 @@ mod tests {
         assert_eq!(date, date2);
     }
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn get_current_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(date, current);
     }
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn get_day_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
@@ -326,7 +326,7 @@ mod tests {
         assert_eq!(date, current);
     }
 
-    #[tokio::test(threaded_scheduler)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn get_range_rates() {
         let dir = tempdir().unwrap();
         let path = dir.into_path();
